@@ -1,5 +1,6 @@
 package iuh.fit.se.phazelsound.modules.auth.controller;
 
+import iuh.fit.se.phazelsound.common.annotation.RateLimit;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.RegisterUserRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.ResetPasswordRequest;
 import iuh.fit.se.phazelsound.modules.auth.service.AuthService;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
     private final AuthService authService;
 
+    @RateLimit(key = "register", count = 3, period = 300)
     @PostMapping("/register")
     public ResponseEntity<String> register(@RequestBody @Valid RegisterUserRequest request) {
         return ResponseEntity.ok(authService.register(request));
@@ -25,12 +27,14 @@ public class AuthController {
     }
 
     // POST /api/auth/resend-register-otp?email=...
+    @RateLimit(key = "resend-otp", count = 3, period = 300)
     @PostMapping("/resend-register-otp")
     public ResponseEntity<String> resendRegisterOtp(@RequestParam String email) {
         return ResponseEntity.ok(authService.resendRegisterOtp(email));
     }
 
     // POST /api/auth/forgot-password?email=...
+    @RateLimit(key = "forgot-pass", count = 3, period = 600)
     @PostMapping("/forgot-password")
     public ResponseEntity<String> forgotPassword(@RequestParam String email) {
         return ResponseEntity.ok(authService.sendForgotPasswordOtp(email));
