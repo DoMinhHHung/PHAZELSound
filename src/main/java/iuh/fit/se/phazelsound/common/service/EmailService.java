@@ -45,7 +45,28 @@ public class EmailService {
 
         } catch (MessagingException e) {
             log.error("Lỗi sấp mặt khi gửi mail: {}", e.getMessage());
-            // Vì là async nên không throw exception ra ngoài Controller được, chỉ log lại thôi.
+        }
+    }
+    @Async
+    public void sendForgotPasswordOtp(String toEmail, String name, String otp) {
+        try {
+            log.info("Gửi OTP quên mật khẩu tới: {}", toEmail);
+            MimeMessage message = javaMailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, StandardCharsets.UTF_8.name());
+
+            Context context = new Context();
+            context.setVariable("name", name);
+            context.setVariable("otp", otp);
+
+            String htmlContent = templateEngine.process("email/forgot-password", context);
+
+            helper.setTo(toEmail);
+            helper.setSubject("[Phazel Sound] Đặt lại mật khẩu");
+            helper.setText(htmlContent, true);
+
+            javaMailSender.send(message);
+        } catch (MessagingException e) {
+            log.error("Lỗi gửi mail reset pass: {}", e.getMessage());
         }
     }
 }

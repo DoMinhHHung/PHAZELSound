@@ -2,6 +2,7 @@ package iuh.fit.se.phazelsound.modules.auth.service.impl;
 
 import iuh.fit.se.phazelsound.common.service.EmailService;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.RegisterUserRequest;
+import iuh.fit.se.phazelsound.modules.auth.dto.request.ResetPasswordRequest;
 import iuh.fit.se.phazelsound.modules.auth.entity.AuthProvider;
 import iuh.fit.se.phazelsound.modules.auth.entity.UserRole;
 import iuh.fit.se.phazelsound.modules.auth.service.AuthService;
@@ -80,6 +81,62 @@ public class AuthServiceImpl implements AuthService {
         redisTemplate.delete(redisKey);
 
         return "Verification successful! Account has been activated.";
+    }
+
+    @Override
+    public String resendRegisterOtp(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Email này chưa đăng ký mà?"));
+
+        if (user.getStatus() == UserStatus.ACTIVE) {
+            throw new RuntimeException("Tài khoản này đã kích hoạt rồi, đăng nhập đi ba.");
+        }
+
+        String otp = generateOtp();
+        String redisKey = "OTP_REGISTER:" + email;
+        redisTemplate.opsForValue().set(redisKey, otp, Duration.ofMinutes(5));
+
+        emailService.sendRegisterOtp(email, user.getFullName(), otp);
+
+        return "Đã gửi lại OTP đăng ký. Check mail đi.";
+    }
+
+    @Override
+    public String sendForgotPasswordOtp(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Email không tồn tại trong hệ thống."));
+
+        String otp = generateOtp();
+
+        String redisKey = "OTP_FORGOT:" + email;
+        redisTemplate.opsForValue().set(redisKey, otp, Duration.ofMinutes(5));
+
+        emailService.sendForgotPasswordOtp(email, user.getFullName(), otp);
+
+        return "Đã gửi OTP đặt lại mật khẩu. Check mail.";
+    }
+
+    @Override
+    public String resetPassword(ResetPasswordRequest request) {
+        String redisKey = "OTP_FORGOT:" + request.getEmail();
+        Object storedOtp = redisTemplate.opsForValue().get(redisKey);
+
+        if (storedOtp == null) {
+            throw new RuntimeException("OTP hết hạn hoặc không tồn tại.");
+        }
+        if (!storedOtp.toString().equals(request.getOtp())) {
+            throw new RuntimeException("OTP sai rồi.");
+        }
+
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new RuntimeException("User không tồn tại."));
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+
+        redisTemplate.delete(redisKey);
+
+        return "Đặt lại mật khẩu thành công! Giờ đăng nhập bằng pass mới đi.";
     }
 
     private String generateOtp() {
