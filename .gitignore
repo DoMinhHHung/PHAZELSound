@@ -1,6 +1,6 @@
 .env
 
-HELPgi.md
+HELP.md
 target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
