@@ -115,6 +115,7 @@ public class AuthServiceImpl implements AuthService {
         String refreshToken = jwtService.generateRefreshToken(user);
 
         return AuthResponse.builder()
+                .message("Login successfully.")
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .build();
