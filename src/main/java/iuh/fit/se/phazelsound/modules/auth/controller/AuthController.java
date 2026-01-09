@@ -1,8 +1,10 @@
 package iuh.fit.se.phazelsound.modules.auth.controller;
 
 import iuh.fit.se.phazelsound.common.annotation.RateLimit;
+import iuh.fit.se.phazelsound.modules.auth.dto.request.LoginUserRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.RegisterUserRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.ResetPasswordRequest;
+import iuh.fit.se.phazelsound.modules.auth.dto.response.AuthResponse;
 import iuh.fit.se.phazelsound.modules.auth.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,11 @@ public class AuthController {
     @PostMapping("/verify")
     public ResponseEntity<String> verify(@RequestParam String email, @RequestParam String otp) {
         return ResponseEntity.ok(authService.verifyRegisterOtp(email, otp));
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<AuthResponse> login(@RequestBody @Valid LoginUserRequest request) {
+        return ResponseEntity.ok(authService.login(request));
     }
 
     // POST /api/auth/resend-register-otp?email=...
