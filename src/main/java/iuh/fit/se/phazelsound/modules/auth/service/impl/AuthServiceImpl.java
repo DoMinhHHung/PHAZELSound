@@ -1,6 +1,11 @@
 package iuh.fit.se.phazelsound.modules.auth.service.impl;
 
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
+import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.json.jackson2.JacksonFactory;
 import iuh.fit.se.phazelsound.common.service.EmailService;
+import iuh.fit.se.phazelsound.modules.auth.dto.request.ExchangeTokenRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.LoginUserRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.RegisterUserRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.ResetPasswordRequest;
@@ -20,8 +25,11 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
+import java.util.Collections;
+import java.util.Map;
 import java.util.Random;
 
 @Service
@@ -39,6 +47,9 @@ public class AuthServiceImpl implements AuthService {
 
     @Value("${application.security.otp.expiration-minutes}")
     private long otpExpirationMinutes;
+
+    @Value("${application.security.oauth2.google.client-id}")
+    private String googleClientId;
 
     @Override
     public String register(RegisterUserRequest request) {
@@ -177,7 +188,116 @@ public class AuthServiceImpl implements AuthService {
         return "Password reset successful";
     }
 
+    @Override
+    public AuthResponse loginWithGoogle(ExchangeTokenRequest request) {
+        log.info("Google Client ID: {}", googleClientId);
+        log.info("Token nhận được từ Postman: {}", request.getToken());
+
+        if (request.getToken() == null) {
+            throw new RuntimeException("Token gửi lên bị NULL!");
+        }
+        try {
+            GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(
+                    new NetHttpTransport(), new JacksonFactory())
+                    .setAudience(Collections.singletonList(googleClientId))
+                    .build();
+
+            GoogleIdToken idToken = verifier.verify(request.getToken());
+            if (idToken == null) {
+                throw new RuntimeException("Token Google đểu hoặc đã hết hạn.");
+            }
+
+            GoogleIdToken.Payload payload = idToken.getPayload();
+            String email = payload.getEmail();
+            String name = (String) payload.get("name");
+            String pictureUrl = (String) payload.get("picture");
+            String providerId = payload.getSubject();
+
+            User user = processSocialUser(email, name, pictureUrl, AuthProvider.GOOGLE, providerId);
+
+            return generateAuthResponse(user);
+
+        } catch (Exception e) {
+            log.error("Lỗi Google Login: {}", e.getMessage());
+            throw new RuntimeException("Lỗi xác thực Google: " + e.getMessage());
+        }
+    }
+
+
+    @Override
+    public AuthResponse loginWithFacebook(ExchangeTokenRequest request) {
+        try {
+            String url = "https://graph.facebook.com/me?fields=id,name,email,picture&access_token=" + request.getToken();
+            RestTemplate restTemplate = new RestTemplate();
+
+            Map<String, Object> data = restTemplate.getForObject(url, Map.class);
+
+            if (data == null || data.containsKey("error")) {
+                throw new RuntimeException("Token Facebook không hợp lệ.");
+            }
+
+            String email = (String) data.get("email");
+            String name = (String) data.get("name");
+            String providerId = (String) data.get("id");
+
+            String pictureUrl = null;
+            if (data.containsKey("picture")) {
+                Map<String, Object> pictureObj = (Map<String, Object>) data.get("picture");
+                Map<String, Object> dataObj = (Map<String, Object>) pictureObj.get("data");
+                pictureUrl = (String) dataObj.get("url");
+            }
+
+            if (email == null) {
+                email = providerId + "@facebook.com";
+            }
+
+            // Xử lý User
+            User user = processSocialUser(email, name, pictureUrl, AuthProvider.FACEBOOK, providerId);
+
+            return generateAuthResponse(user);
+
+        } catch (Exception e) {
+            log.error("Lỗi Facebook Login: {}", e.getMessage());
+            throw new RuntimeException("Lỗi xác thực Facebook.");
+        }
+    }
+
     private String generateOtp() {
         return String.format("%06d", new Random().nextInt(999999));
+    }
+
+    private User processSocialUser(String email, String name, String avatarUrl, AuthProvider provider, String providerId) {
+        User user = userRepository.findByEmail(email).orElse(null);
+
+        if (user == null) {
+            user = User.builder()
+                    .email(email)
+                    .fullName(name)
+                    .avatarUrl(avatarUrl)
+                    .role(UserRole.USER)
+                    .status(UserStatus.ACTIVE)
+                    .provider(provider)
+                    .providerId(providerId)
+                    .password(null)
+                    .build();
+        } else {
+            user.setFullName(name);
+            user.setAvatarUrl(avatarUrl);
+            if (user.getProvider() == AuthProvider.LOCAL) {
+                user.setProvider(provider);
+                user.setProviderId(providerId);
+            }
+        }
+        return userRepository.save(user);
+    }
+
+    private AuthResponse generateAuthResponse(User user) {
+        String accessToken = jwtService.generateAccessToken(user);
+        String refreshToken = jwtService.generateRefreshToken(user);
+        return AuthResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .message("Login successfully with " + user.getProvider())
+                .build();
     }
 }

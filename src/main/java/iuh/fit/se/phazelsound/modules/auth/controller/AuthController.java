@@ -1,6 +1,7 @@
 package iuh.fit.se.phazelsound.modules.auth.controller;
 
 import iuh.fit.se.phazelsound.common.annotation.RateLimit;
+import iuh.fit.se.phazelsound.modules.auth.dto.request.ExchangeTokenRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.LoginUserRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.RegisterUserRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.ResetPasswordRequest;
@@ -51,5 +52,15 @@ public class AuthController {
     @PostMapping("/reset-password")
     public ResponseEntity<String> resetPassword(@RequestBody @Valid ResetPasswordRequest request) {
         return ResponseEntity.ok(authService.resetPassword(request));
+    }
+
+    @PostMapping("/login/google")
+    public ResponseEntity<AuthResponse> loginGoogle(@RequestBody @Valid ExchangeTokenRequest request) {
+        return ResponseEntity.ok(authService.loginWithGoogle(request));
+    }
+
+    @PostMapping("/login/facebook")
+    public ResponseEntity<AuthResponse> loginFacebook(@RequestBody @Valid ExchangeTokenRequest request) {
+        return ResponseEntity.ok(authService.loginWithFacebook(request));
     }
 }

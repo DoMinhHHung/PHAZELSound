@@ -1,5 +1,6 @@
 package iuh.fit.se.phazelsound.modules.auth.service;
 
+import iuh.fit.se.phazelsound.modules.auth.dto.request.ExchangeTokenRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.LoginUserRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.RegisterUserRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.ResetPasswordRequest;
@@ -13,4 +14,7 @@ public interface AuthService {
     String resendRegisterOtp(String email);
     String sendForgotPasswordOtp(String email);
     String resetPassword(ResetPasswordRequest request);
+
+    AuthResponse loginWithGoogle(ExchangeTokenRequest request);
+    AuthResponse loginWithFacebook(ExchangeTokenRequest request);
 }
