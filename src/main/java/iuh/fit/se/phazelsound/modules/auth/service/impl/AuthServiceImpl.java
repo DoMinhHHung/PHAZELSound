@@ -1,17 +1,23 @@
 package iuh.fit.se.phazelsound.modules.auth.service.impl;
 
 import iuh.fit.se.phazelsound.common.service.EmailService;
+import iuh.fit.se.phazelsound.modules.auth.dto.request.LoginUserRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.RegisterUserRequest;
 import iuh.fit.se.phazelsound.modules.auth.dto.request.ResetPasswordRequest;
+import iuh.fit.se.phazelsound.modules.auth.dto.response.AuthResponse;
 import iuh.fit.se.phazelsound.modules.auth.entity.AuthProvider;
 import iuh.fit.se.phazelsound.modules.auth.entity.UserRole;
 import iuh.fit.se.phazelsound.modules.auth.service.AuthService;
+import iuh.fit.se.phazelsound.modules.auth.service.JwtService;
 import iuh.fit.se.phazelsound.modules.user.entity.User;
 import iuh.fit.se.phazelsound.modules.user.entity.UserStatus;
 import iuh.fit.se.phazelsound.modules.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -27,6 +33,12 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final RedisTemplate<String, Object> redisTemplate;
     private final EmailService emailService;
+
+    private final JwtService jwtService;
+    private final AuthenticationManager authenticationManager;
+
+    @Value("${application.security.otp.expiration-minutes}")
+    private long otpExpirationMinutes;
 
     @Override
     public String register(RegisterUserRequest request) {
@@ -50,7 +62,7 @@ public class AuthServiceImpl implements AuthService {
 
         String otp = generateOtp();
         String redisKey = "OTP_REGISTER:" + request.getEmail();
-        redisTemplate.opsForValue().set(redisKey, otp, Duration.ofMinutes(5));
+        redisTemplate.opsForValue().set(redisKey, otp, Duration.ofMinutes(otpExpirationMinutes));
 
         log.info("Saved OTP to Redis: Key={}, OTP={}", redisKey, otp);
         emailService.sendRegisterOtp(request.getEmail(), request.getName(), otp);
@@ -61,59 +73,84 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public String verifyRegisterOtp(String email, String otp) {
         String redisKey = "OTP_REGISTER:" + email;
-
         Object storedOtp = redisTemplate.opsForValue().get(redisKey);
 
         if (storedOtp == null) {
-            throw new RuntimeException("OTP has expired or is incorrect.");
+            throw new RuntimeException("The OTP code has expired or is incorrect.");
         }
 
         if (!storedOtp.toString().equals(otp)) {
-            throw new RuntimeException("OTP has expired or is incorrect..");
+            throw new RuntimeException("OTP incorrect.");
         }
 
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Not found user."));
+
+        if (user.getStatus() == UserStatus.ACTIVE) {
+            redisTemplate.delete(redisKey);
+            return "This account has been activated.";
+        }
 
         user.setStatus(UserStatus.ACTIVE);
         userRepository.save(user);
 
         redisTemplate.delete(redisKey);
 
-        return "Verification successful! Account has been activated.";
+        return "Verification successful. Account has been activated.";
+    }
+
+    @Override
+    public AuthResponse login(LoginUserRequest request) {
+        User user = userRepository.findByEmailOrPhone(request.getIdentifier(), request.getIdentifier())
+                .orElseThrow(() -> new RuntimeException("Not found user."));
+
+        authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                        user.getEmail(),
+                        request.getPassword()
+                )
+        );
+
+        String accessToken = jwtService.generateAccessToken(user);
+        String refreshToken = jwtService.generateRefreshToken(user);
+
+        return AuthResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .build();
     }
 
     @Override
     public String resendRegisterOtp(String email) {
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("Email này chưa đăng ký mà?"));
+                .orElseThrow(() -> new RuntimeException("Email not registered."));
 
         if (user.getStatus() == UserStatus.ACTIVE) {
-            throw new RuntimeException("Tài khoản này đã kích hoạt rồi, đăng nhập đi ba.");
+            throw new RuntimeException("This account has been activated.");
         }
 
         String otp = generateOtp();
         String redisKey = "OTP_REGISTER:" + email;
-        redisTemplate.opsForValue().set(redisKey, otp, Duration.ofMinutes(5));
+        redisTemplate.opsForValue().set(redisKey, otp, Duration.ofMinutes(otpExpirationMinutes));
 
         emailService.sendRegisterOtp(email, user.getFullName(), otp);
 
-        return "Đã gửi lại OTP đăng ký. Check mail đi.";
+        return "The OTP has been sent. Please check your email or spam folder.";
     }
 
     @Override
     public String sendForgotPasswordOtp(String email) {
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("Email không tồn tại trong hệ thống."));
+                .orElseThrow(() -> new RuntimeException("Email not found."));
 
         String otp = generateOtp();
 
         String redisKey = "OTP_FORGOT:" + email;
-        redisTemplate.opsForValue().set(redisKey, otp, Duration.ofMinutes(5));
+        redisTemplate.opsForValue().set(redisKey, otp, Duration.ofMinutes(otpExpirationMinutes));
 
         emailService.sendForgotPasswordOtp(email, user.getFullName(), otp);
 
-        return "Đã gửi OTP đặt lại mật khẩu. Check mail.";
+        return "The password reset OTP has been sent. Please check your email or spam folder.";
     }
 
     @Override
@@ -122,21 +159,21 @@ public class AuthServiceImpl implements AuthService {
         Object storedOtp = redisTemplate.opsForValue().get(redisKey);
 
         if (storedOtp == null) {
-            throw new RuntimeException("OTP hết hạn hoặc không tồn tại.");
+            throw new RuntimeException("The OTP has expired or does not exist.");
         }
         if (!storedOtp.toString().equals(request.getOtp())) {
-            throw new RuntimeException("OTP sai rồi.");
+            throw new RuntimeException("OTP incorrect.");
         }
 
         User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new RuntimeException("User không tồn tại."));
+                .orElseThrow(() -> new RuntimeException("Not found user."));
 
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
 
         redisTemplate.delete(redisKey);
 
-        return "Đặt lại mật khẩu thành công! Giờ đăng nhập bằng pass mới đi.";
+        return "Password reset successful";
     }
 
     private String generateOtp() {
